@@ -4,6 +4,10 @@
   "description": "Blerf monorepo/solution/project management tool. Handle dependencies and run build tasks when source files change. Pack for publish, pack for deployment.",
   "author": "andersnm",
   "license": "MIT",
+  "repository" : { 
+    "type": "git",
+    "url": "https://github.com/andersnm/blerf.git"
+  },
   "bin": "lib/index.js",
   "files": [
     "lib"
