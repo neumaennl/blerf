@@ -1,0 +1,15 @@
+{
+  "name": "root",
+  "private": true,
+  "devDependencies": {
+    "blerf": "file:packages/blerf"
+  },
+  "dependencies": {},
+  "scripts": {
+    "preinstall": "cd packages/blerf && npm install && npm run build",
+    "build": "blerf build",
+    "test": "blerf build && blerf test",
+    "pack": "blerf pack:publish",
+    "deploy": "blerf pack:deploy"
+  }
+}

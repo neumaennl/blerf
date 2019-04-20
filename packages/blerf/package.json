@@ -1,0 +1,44 @@
+{
+  "name": "blerf",
+  "version": "0.0.1",
+  "description": "Blerf monorepo/solution/project management tool. Handle dependencies and run build tasks when source files change. Pack for publish, pack for deployment.",
+  "author": "andersnm",
+  "license": "MIT",
+  "bin": "lib/index.js",
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^10.12.7",
+    "typescript": "^3.3.1"
+  },
+  "dependencies": {
+    "fast-glob": "^2.2.6",
+    "stringify-package": "^1.0.0",
+    "tar": "^4.4.8",
+    "istanbul-lib-coverage": "^2.0.3",
+    "istanbul-lib-report": "^2.0.4",
+    "istanbul-lib-source-maps": "^2.0.1",
+    "istanbul-reports": "^2.1.1",
+    "semver": "^6.0.0",
+    "source-map-resolve": "^0.5.2",
+    "source-map": "^0.7.3",
+    "v8-to-istanbul": "^2.0.4"
+  },
+  "blerf": {
+    "steps": [
+      {
+        "outPath": "lib/**/*.js",
+        "srcPath": [
+          "src/**/*.ts",
+          "tsconfig.json",
+          "package.json"
+        ],
+        "script": "tsc"
+      }
+    ]
+  }
+}
