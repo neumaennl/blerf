@@ -9,7 +9,7 @@
     "preinstall": "cd packages/blerf && npm install && npm run build",
     "build": "blerf build",
     "test": "blerf build && blerf test",
-    "pack": "blerf pack:publish",
-    "deploy": "blerf pack:deploy"
+    "pack": "blerf build && blerf pack:publish",
+    "deploy": "blerf build && blerf pack:deploy"
   }
 }

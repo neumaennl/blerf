@@ -4,6 +4,7 @@ import * as childProcess from 'child_process';
 import { PackageEnumerator, PackagesType } from "../packageEnumerator";
 const glob = require('fast-glob');
 const semver = require('semver');
+const stringifyPackage = require("stringify-package");
 
 interface IBuildStep {
     srcPath?: string|string[];
@@ -17,7 +18,7 @@ export class BuildEnumerator extends PackageEnumerator {
     }
 
     protected async processPackage(packagePath: string, packageJson: any, packages: PackagesType): Promise<void> {
-        if (this.needsNpmInstall(packagePath, packageJson)) {
+        if (this.needsNpmInstall(packagePath, packageJson, packages)) {
             console.log("blerf: installing " + packageJson.name);
             childProcess.execSync("npm install", {stdio: 'inherit', cwd: packagePath});
         } else {
@@ -90,7 +91,71 @@ export class BuildEnumerator extends PackageEnumerator {
         }
     }
 
-    private needsNpmInstall(packagePath: string, packageJson: any): boolean {
+    private needsNpmInstall(packagePath: string, packageJson: any, packages: PackagesType): boolean {
+
+        // Workaround errors during npm install with file: references in package-lock.json, f.ex this error message:
+        // verbose stack Error: ENOENT: no such file or directory, rename 'd:\Code\festtest\lib-b\node_modules\.staging\lib-a-3f8fcb24\node_modules\@babel\code-frame' -> 'd:\Code\festtest\lib-b\node_modules\.staging\@babel\code-frame-7800f1dd'
+        // This occurs when installing a project which depends on a file:-based library, and dependencies were removed from the library.
+        // And this error message:
+        // npm ERR! Cannot read property 'match' of undefined
+        // This also occurs when installing a project which depends on a file:-based library, and there were changes in the library dependencies.
+        // Haven't been able to reproduce this. There were bogus entries for dependencies of a file:-based reference without version:
+        // "version": "file:../project",
+        // ...
+        // "dependencies": {
+        //   ...
+        //   "@babel/core": {
+        //     "bundled": true
+        //   }, 
+
+        // To resolve both of these, check for changes in the referenced package.json,
+        // remove such file:-based entries in the parent package-lock and run npm install.
+        
+        let packageLockJson: any;
+        try {
+            packageLockJson = this.readPackageJson(path.join(packagePath, "package-lock.json"));
+        } catch (e) {
+            packageLockJson = null;
+        }
+
+        let savePackageLockJson = false;
+        if (packageLockJson && packageLockJson.dependencies) {
+            for (const dependencyName of Object.keys(packageLockJson.dependencies)) {
+
+                const dependencyInfo = packageLockJson.dependencies[dependencyName];
+                if (typeof dependencyInfo.version !== "string") {
+                    console.log("blerf: recovering from npm error scenario: invalid version. package-lock.json has been modified.");
+                    savePackageLockJson = true;
+                    delete packageLockJson.dependencies[dependencyName];
+                    continue;
+                }
+
+                if (dependencyInfo.version.startsWith("file:")) {
+                    const dependencyPackageInfo = packages[dependencyName];
+                    if (!dependencyPackageInfo) {
+                        continue;
+                    }
+
+                    const dependencyPackageJson = dependencyPackageInfo.packageJson;
+
+                    // Get sub-toplevel dependencies of file:-based dependency from package-lock
+                    const dependencyToplevelDependencies = this.getTopLevelDependencies(dependencyInfo.dependencies);
+
+                    if (!this.hasAllDependencies(dependencyPackageJson, dependencyToplevelDependencies)) {
+                        console.log("blerf: recovering from npm error scenario: file:-based dependency mismatch. package-lock.json has been modified.");
+                        delete packageLockJson.dependencies[dependencyName];
+                        savePackageLockJson = true;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        if (savePackageLockJson) {
+            fs.writeFileSync(path.join(packagePath, "package-lock.json"), stringifyPackage(packageLockJson), 'utf8');
+            return true;
+        }
+
         if (packageJson.dependencies) {
             if (this.needsNpmInstallDependencies(packageJson.dependencies, packagePath)) {
                 return true;
@@ -104,33 +169,48 @@ export class BuildEnumerator extends PackageEnumerator {
         }
 
         // Compare package.json with package-lock.json if anything was removed
-        let packageLockJson: any;
-        try {
-            packageLockJson = this.readPackageJson(path.join(packagePath, "package-lock.json"));
-        } catch (e) {
-            packageLockJson = null;
-        }
-
         if (packageLockJson && packageLockJson.dependencies) {
-            const nonTopLevelNames: string[] = [];
-
-            this.scanNonTopLevelDependencies(packageLockJson.dependencies, nonTopLevelNames);
-
-            for (const dependencyName of Object.keys(packageLockJson.dependencies)) {
-                if (nonTopLevelNames.indexOf(dependencyName) !== -1) {
-                    continue;
-                }
-
-                const isInDependencies = packageJson.dependencies && !!packageJson.dependencies[dependencyName];
-                const isInDevDependencies = packageJson.devDependencies && !!packageJson.devDependencies[dependencyName];
-                if (!isInDependencies && !isInDevDependencies) {
-                    console.log("blerf: top level dependency " + dependencyName + " not in package.json")
-                    return true;
-                }
+            const topLevelDependencies = this.getTopLevelDependencies(packageLockJson.dependencies);
+            if (!this.hasAllDependencies(packageJson, topLevelDependencies)) {
+                console.log("blerf: requires install: top level dependency in package-lock.json missing from package.json")
+                return true;
             }
         }
 
         return false;
+    }
+
+    private hasAllDependencies(packageJson: any, dependencyNames: string[]) {
+        for (const dependencyName of dependencyNames) {
+            if (!this.hasDependency(packageJson, dependencyName)) {
+                console.log("MISSING" + dependencyName)
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private hasDependency(packageJson: any, dependencyName: string) {
+        const isInDependencies = packageJson.dependencies && !!packageJson.dependencies[dependencyName];
+        const isInDevDependencies = packageJson.devDependencies && !!packageJson.devDependencies[dependencyName];
+        return isInDependencies || isInDevDependencies;
+    }
+
+    private getTopLevelDependencies(dependencies: any): string[] {
+        const nonTopLevelNames: string[] = [];
+        this.scanNonTopLevelDependencies(dependencies, nonTopLevelNames);
+
+        const result: string[] = [];
+        for (const dependencyName of Object.keys(dependencies)) {
+            if (nonTopLevelNames.indexOf(dependencyName) !== -1) {
+                continue;
+            }
+
+            result.push(dependencyName);
+        }
+
+        return result;
     }
 
     private scanNonTopLevelDependencies(dependencies: any, nonTopLevelNames: string[]) {

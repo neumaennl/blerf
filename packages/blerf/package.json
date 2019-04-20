@@ -1,6 +1,6 @@
 {
   "name": "blerf",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Blerf monorepo/solution/project management tool. Handle dependencies and run build tasks when source files change. Pack for publish, pack for deployment.",
   "author": "andersnm",
   "license": "MIT",
