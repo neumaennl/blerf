@@ -151,8 +151,23 @@ export class BuildEnumerator extends PackageEnumerator {
             }
         }
 
+        let shouldInstall = false;
+
         if (savePackageLockJson) {
             fs.writeFileSync(path.join(packagePath, "package-lock.json"), stringifyPackage(packageLockJson), 'utf8');
+            shouldInstall = true;
+        }
+
+        // Another npm install error recovery scenario: if a file:-based dependency has been installed in a directory instead of symlink
+        if (packageJson.dependencies) {
+            shouldInstall = this.fixNonSymlinkFileDependencies(packageJson.dependencies, packagePath) || shouldInstall;
+        }
+
+        if (packageJson.devDependencies) {
+            shouldInstall = this.fixNonSymlinkFileDependencies(packageJson.devDependencies, packagePath) || shouldInstall;
+        }
+
+        if (shouldInstall) {
             return true;
         }
 
@@ -227,6 +242,24 @@ export class BuildEnumerator extends PackageEnumerator {
                 this.scanNonTopLevelDependencies(dependencyInfo.dependencies, nonTopLevelNames);
             }
         }
+    }
+
+    private fixNonSymlinkFileDependencies(dependencies: {[name: string]: string}, packagePath: string): boolean {
+        let recovered = false;
+        for (let dependencyName of Object.keys(dependencies)) {
+            const dependencyVersion = dependencies[dependencyName];
+
+            if (dependencyVersion.startsWith("file:")) {
+                const dependencyNodePath = path.join(packagePath, "node_modules", dependencyName);
+                if (!fs.lstatSync(dependencyNodePath).isSymbolicLink()) {
+                    console.log("blerf: recovering from npm error scenario: 'file:'-dependency exists in node_modules, but is not a symlink");
+                    this.rimraf(dependencyNodePath);
+                    recovered = true;
+                }
+            }
+        }
+
+        return recovered;
     }
 
     private needsNpmInstallDependencies(dependencies: {[name: string]: string}, packagePath: string): boolean {

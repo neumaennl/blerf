@@ -9,6 +9,7 @@ Opinionated build tool for nodejs monorepos working alongside npm. Helps manage 
 - Dependency management: Run `npm install` as part of the build only when something changed
 - Artifacts: Run `npm pack` in multiple projects and fix up local project references
 - Run tests with native V8 code coverage
+- Resilience: Detect and recover from node_modules corruption
 
 ## Commands
 
@@ -72,9 +73,45 @@ Basic conventions and guidelines:
 - Create new projects in directories under ./packages
 - Create test projects separately under ./packages
 - Add project references as dependencies using relative `file:` references in package.json
+- Add npm package references as dependencies by editing package.json manually
+- Bootstrap the repo once with `npm install`, then use `blerf build` to install dependencies and build the solution
 
 ## Release workflow
 
 - Bump, build, test, tag, commit and push latest version using regular blerf, git and npm cli commands
 - Use `blerf pack:publish` instead of `npm pack` to create tarball(s)
 - Use `npm login` / `npm publish`
+
+## npm error recovery
+
+`blerf build` automatically detects and recovers from certain situations where `npm install` would otherwise fail:
+
+### Removed dependency in referenced project
+
+When a dependency is removed from a project, it still lingers in package-lock of projects depending on it. This causes `npm install` to return an error like this:
+
+```
+Error: ENOENT: no such file or directory, rename XXX --> YYY
+```
+
+Resolved by removing the project reference from package-lock.json and issue a reinstall.
+
+### Corrupted package-lock.json
+
+Another issue also seems to occur after removing dependencies in projects that depend on each other, but has not not reproduced consistently. In this case, there are corrupted entries in package-lock lacking a version field, and  `npm install` will return an error like this:
+
+```
+ERR! Cannot read property 'match' of undefined
+```
+
+Resolved by removing the project reference from package-lock.json and issue a reinstall.
+
+### Non-symlink project referencess
+
+If a 'file:'-based dependency is somehow installed as a directory rather than a symlink, `npm install` will return an error like this:
+
+```
+ERR! enoent ENOENT: no such file or directory, rename XXX -> YYY
+```
+
+Resolved by removing the installed directory from node_modules and issue a reinstall.
