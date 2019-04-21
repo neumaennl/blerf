@@ -12,9 +12,13 @@ Opinionated build tool for nodejs monorepos working alongside npm. Helps manage 
 
 ## Commands
 
-`blerf build`
+### `blerf build`
 
-In each directory under ./packages containing a package.json, first runs `npm install` if any of the top level dependencies are missing, and then executes any build steps. A build step is skipped if there are no changes in the filesystem based on the glob patterns in `srcPath` and `outPath`. The code in `script` is spawned similar to npm scripts, where the PATH environment variable is modified to include node_modules/.bin.
+Installs dependencies and executes any build steps in each directory under ./packages containing a package.json.
+
+Dependencies are skipped if all top level dependencies are present in a project's node_modules folder. Detects and recovers from certain types of corruption in package-lock.json. Uses `npm install` under the hood.
+
+Build steps are specified in package.json. Build steps are skipped if there are no changes in the filesystem based on the glob patterns in `srcPath` and `outPath`. The code in `script` is spawned similar to npm scripts, where the PATH environment variable is modified to include node_modules/.bin.
 
 Example blerf section in package.json with a build step for TypeScript:
 
@@ -32,11 +36,19 @@ Example blerf section in package.json with a build step for TypeScript:
 
 The values for outPath and srcPath must match the tsconfig.json compiler options.
 
-`blerf pack:publish`
+### `blerf pack:publish`
 
-Executes `npm pack` in each directory under ./packages containing a package.json and fixes up any project references in the tarballs. This extracts each tarball to a temp directory, changes any `file:` based dependencies in package.json to their corresponding version, updates the tarball and cleans up.
+Creates tarballs for each directory under ./packages containing a package.json. The output  *.tgz files are located in ./artifacts/publish and are suitable for publishing to a registry. 
 
-`blerf test`
+Uses `npm pack` under the hood. The final tarballs will have fixed project references pointing to their corresponding version number with a ^-modifier.
+
+### `blerf pack:deploy`
+
+Creates standalone tarballs for each directory under ./packages containing a package.json. The output *.tgz files are located in ./artifacts/deploy and are suitable for application deployments.
+
+Uses `npm pack` and `npm install` under the hood. The final tarballs will have all dependencies included.
+
+### `blerf test`
 
 Executes `npm run test` in each directory under ./packages containing a package.json having a test script. If `coverageFrom` is set to a valid path, code coverage information will be collected and reported using Node's built-in `NODE_V8_COVERAGE` coverage facilities, with source map support. The built-in code coverage requires Node 10.12 or newer, and a test runner which does not transform/wrap the source code.
 
@@ -48,7 +60,7 @@ Example blerf section in package.json enabling coverage on files in a sibling pr
 }
 ```
 
-`blerf run [xxx]`
+### `blerf run [xxx]`
 
 Executes `npm run [xxx]` in each directory under ./packages containing a package.json having a corresponding script.
 

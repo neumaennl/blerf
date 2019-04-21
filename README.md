@@ -4,6 +4,8 @@ Monorepo for blerf, a monorepo tool.
 
 See [packages/blerf](packages/blerf)
 
+[![Build status](https://ci.appveyor.com/api/projects/status/ivy1wa5f6dsmdmym?svg=true)](https://ci.appveyor.com/project/andersnm/blerf)
+
 ## Building the source code
 
 Check out and bootstrap the monorepo:

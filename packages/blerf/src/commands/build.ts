@@ -183,7 +183,6 @@ export class BuildEnumerator extends PackageEnumerator {
     private hasAllDependencies(packageJson: any, dependencyNames: string[]) {
         for (const dependencyName of dependencyNames) {
             if (!this.hasDependency(packageJson, dependencyName)) {
-                console.log("MISSING" + dependencyName)
                 return false;
             }
         }
