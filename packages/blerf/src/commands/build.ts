@@ -251,7 +251,7 @@ export class BuildEnumerator extends PackageEnumerator {
 
             if (dependencyVersion.startsWith("file:")) {
                 const dependencyNodePath = path.join(packagePath, "node_modules", dependencyName);
-                if (!fs.lstatSync(dependencyNodePath).isSymbolicLink()) {
+                if (fs.existsSync(dependencyNodePath) && !fs.lstatSync(dependencyNodePath).isSymbolicLink()) {
                     console.log("blerf: recovering from npm error scenario: 'file:'-dependency exists in node_modules, but is not a symlink");
                     this.rimraf(dependencyNodePath);
                     recovered = true;
