@@ -203,6 +203,18 @@ export class BuildEnumerator extends PackageEnumerator {
     }
 
     private compareLockDependencies(localDependencies: any, refDependencies: any) {
+
+        if (localDependencies === undefined && !!refDependencies) {
+            // npm 6.8.0 addresses the issues being worked around here, and the local lockfile has no dependencies in file:-based references
+            // Local project has no dependencies, referenced project has dependencies. Nothing to check.
+            return true;
+        }
+
+        if (!localDependencies || !refDependencies) {
+            // Project has no dependencies in either lockfile. Nothing to check.
+            return true;
+        }
+
         // Check no dependencies were removed or modified
         for (let refDependencyName of Object.keys(refDependencies)) {
             const localDependencyInfo = localDependencies[refDependencyName];
