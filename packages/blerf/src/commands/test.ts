@@ -27,7 +27,7 @@ export class TestEnumerator extends PackageEnumerator {
     }
 
     protected async processPackage(packagePath: string, packageJson: any, packages: PackagesType): Promise<void> {
-        if (!packageJson.scripts["test"]) {
+        if (!packageJson.scripts || !packageJson.scripts["test"]) {
             console.log("blerf: Skipping " + packagePath + ". No test script");
             return;
         }

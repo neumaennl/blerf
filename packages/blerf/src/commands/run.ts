@@ -11,7 +11,7 @@ export class RunEnumerator extends PackageEnumerator {
     }
 
     protected async processPackage(packagePath: string, packageJson: any, packages: PackagesType): Promise<void> {
-        if (!packageJson.scripts[this.argv[0]]) {
+        if (!packageJson.scripts || !packageJson.scripts[this.argv[0]]) {
             console.log("blerf: Skipping " + packagePath + ". No script '" + this.argv[0] + "'");
             return;
         }

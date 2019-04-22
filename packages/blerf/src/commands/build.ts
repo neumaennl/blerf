@@ -26,7 +26,7 @@ export class BuildEnumerator extends PackageEnumerator {
         }
 
         if (!packageJson.blerf || !packageJson.blerf.steps) {
-            if (!packageJson.scripts["build"]) {
+            if (!packageJson.scripts || !packageJson.scripts.build) {
                 console.log("blerf: no blerf section and no build script in package.json. skipping.");
                 return;
             }
@@ -95,7 +95,8 @@ export class BuildEnumerator extends PackageEnumerator {
 
         // Workaround errors during npm install with file: references in package-lock.json, f.ex this error message:
         // verbose stack Error: ENOENT: no such file or directory, rename 'd:\Code\festtest\lib-b\node_modules\.staging\lib-a-3f8fcb24\node_modules\@babel\code-frame' -> 'd:\Code\festtest\lib-b\node_modules\.staging\@babel\code-frame-7800f1dd'
-        // This occurs when installing a project which depends on a file:-based library, and dependencies were removed from the library.
+        // This occurs when installing a project which depends on a file:-based library, and dependencies were changed/removed from the library.
+
         // And this error message:
         // npm ERR! Cannot read property 'match' of undefined
         // This also occurs when installing a project which depends on a file:-based library, and there were changes in the library dependencies.
@@ -108,9 +109,9 @@ export class BuildEnumerator extends PackageEnumerator {
         //     "bundled": true
         //   }, 
 
-        // To resolve both of these, check for changes in the referenced package.json,
-        // remove such file:-based entries in the parent package-lock and run npm install.
-        
+        // To resolve both of these, remove file:-based entries in the parent package-lock and run npm install, but only
+        // if there are differences between the local and dependency package-lock.json.
+
         let packageLockJson: any;
         try {
             packageLockJson = this.readPackageJson(path.join(packagePath, "package-lock.json"));
@@ -136,13 +137,18 @@ export class BuildEnumerator extends PackageEnumerator {
                         continue;
                     }
 
-                    const dependencyPackageJson = dependencyPackageInfo.packageJson;
+                    const dependencyPackageLockJsonPath = path.join(dependencyPackageInfo.packagePath, "package-lock.json");
+                    if (!fs.existsSync(dependencyPackageLockJsonPath)) {
+                        continue;
+                    }
 
-                    // Get sub-toplevel dependencies of file:-based dependency from package-lock
-                    const dependencyToplevelDependencies = this.getTopLevelDependencies(dependencyInfo.dependencies);
+                    const dependencyPackageLockJson = this.readPackageJson(dependencyPackageLockJsonPath);
 
-                    if (!this.hasAllDependencies(dependencyPackageJson, dependencyToplevelDependencies)) {
-                        console.log("blerf: recovering from npm error scenario: file:-based dependency mismatch. package-lock.json has been modified.");
+                    // Compare the referenced package-lock.json with package-lock.json if anything was removed in the other project
+                    // dependencyInfo = local entry for project reference and its dependencies
+                    // dependencyPackageLockJson = actual project reference and its dependencies
+                    if (!this.compareLockDependencies(dependencyInfo.dependencies, dependencyPackageLockJson.dependencies)) {
+                        console.log("blerf: recovering from npm error scenario: lock file project dependencies mismatch. package-lock.json has been modified.")
                         delete packageLockJson.dependencies[dependencyName];
                         savePackageLockJson = true;
                         continue;
@@ -171,6 +177,7 @@ export class BuildEnumerator extends PackageEnumerator {
             return true;
         }
 
+        // Check the top level dependencies in package.json matches the contents of node_modules
         if (packageJson.dependencies) {
             if (this.needsNpmInstallDependencies(packageJson.dependencies, packagePath)) {
                 return true;
@@ -183,7 +190,7 @@ export class BuildEnumerator extends PackageEnumerator {
             }
         }
 
-        // Compare package.json with package-lock.json if anything was removed
+        // Compare package.json with package-lock.json if anything was removed in the local project
         if (packageLockJson && packageLockJson.dependencies) {
             const topLevelDependencies = this.getTopLevelDependencies(packageLockJson.dependencies);
             if (!this.hasAllDependencies(packageJson, topLevelDependencies)) {
@@ -193,6 +200,39 @@ export class BuildEnumerator extends PackageEnumerator {
         }
 
         return false;
+    }
+
+    private compareLockDependencies(localDependencies: any, refDependencies: any) {
+        // Check no dependencies were removed or modified
+        for (let refDependencyName of Object.keys(refDependencies)) {
+            const localDependencyInfo = localDependencies[refDependencyName];
+            const refDependencyInfo = refDependencies[refDependencyName];
+            if (!this.compareLockDependencyInfo(localDependencyInfo, refDependencyInfo)) {
+                return false;
+            }
+        }
+
+        for (let localDependencyName of Object.keys(localDependencies)) {
+            const localDependencyInfo = localDependencies[localDependencyName];
+            const refDependencyInfo = refDependencies[localDependencyName];
+            if (!this.compareLockDependencyInfo(localDependencyInfo, refDependencyInfo)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private compareLockDependencyInfo(localDependencyInfo: any, refDependencyInfo: any) {
+        if (!localDependencyInfo || !refDependencyInfo) {
+            return false;
+        }
+
+        if (localDependencyInfo.version !== refDependencyInfo.version) {
+            return false;
+        }
+
+        return true;
     }
 
     private hasAllDependencies(packageJson: any, dependencyNames: string[]) {
