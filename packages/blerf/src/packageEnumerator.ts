@@ -166,5 +166,13 @@ export abstract class PackageEnumerator {
         }
     }
 
+    protected trimPackageJson(packageJson: any) {
+        // Remove stuff not needed in "binary" packge
+        // TODO: remove everything except known keys
+        delete packageJson.scripts;
+        delete packageJson.blerf;
+        delete packageJson.devDependencies;
+    }
+
     protected abstract async processPackage(packagePath: string, packageJson: any, packages: PackagesType): Promise<void>;
 }

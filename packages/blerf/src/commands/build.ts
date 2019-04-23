@@ -179,6 +179,7 @@ export class BuildEnumerator extends PackageEnumerator {
             const packageJson = this.readPackageJson(packageJsonPath);
             this.rewriteProjectReferencesFullPath(path.resolve(this.artifactBuildPath), packageJson.dependencies, packages);
             this.rewriteProjectReferencesFullPath(path.resolve(this.artifactBuildPath), packageJson.devDependencies, packages);
+            this.trimPackageJson(packageJson);
             fs.writeFileSync(packageJsonPath, stringifyPackage(packageJson), 'utf8');
 
             tar.create({ file: targetTarPath, cwd: tempPath, gzip: true, sync: true, }, ["package"]);

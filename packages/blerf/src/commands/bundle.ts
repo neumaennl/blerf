@@ -23,9 +23,7 @@ export class BundleEnumerator extends PackageEnumerator {
     }
 
     protected async processPackage(packagePath: string, packageJson: any, packages: PackagesType): Promise<void> {
-        console.log("blerf: bundling node_modules");
-
-        // NOTE: assuming file name of tarball; can also get it from the output of npm pack
+        console.log("blerf: bundling", packageJson.name);
         const tempPath = fs.mkdtempSync(path.join(os.tmpdir(), "blerf-"));
         const artifactPackTarPath = path.join(this.artifactPackPath, packageJson.name + "-" + packageJson.version + ".tgz");
         const artifactTarPath = path.join(this.artifactDeployPath, packageJson.name + "-" + packageJson.version + ".tgz");

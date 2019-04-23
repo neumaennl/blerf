@@ -24,46 +24,36 @@ export class PackEnumerator extends PackageEnumerator {
     }
 
     protected async processPackage(packagePath: string, packageJson: any, packages: PackagesType): Promise<void> {
+        console.log("blerf: packing and patching", packageJson.name);
         childProcess.execSync("npm pack", {stdio: 'inherit', cwd: packagePath});
 
-        console.log("blerf: patching project references");
-
-        // NOTE: assuming file name of tarball; can also get it from the output of npm pack
         const sourcePackageTarPath = path.join(packagePath, packageJson.name + "-" + packageJson.version + ".tgz");
         const tempPath = fs.mkdtempSync(path.join(os.tmpdir(), "blerf-"));
-
         const artifactPackTarPath = path.join(this.artifactPackPath, packageJson.name + "-" + packageJson.version + ".tgz");
 
         fs.mkdirSync(this.artifactPackPath, { recursive: true });
 
         try {
             tar.extract({ file: sourcePackageTarPath, cwd: tempPath, sync: true });
-            this.patchPackageJson(packagePath, path.join(tempPath, "package", "package.json"), path.resolve(this.artifactPackPath), packages);
+
+            const packageJsonPath = path.join(tempPath, "package", "package.json");
+            const packageJson = this.readPackageJson(packageJsonPath);
             if (this.isDeploy) {
+                const artifactPackFullPath = path.resolve(this.artifactPackPath);
+                this.rewriteProjectReferencesFullPathVersion(artifactPackFullPath, packageJson.dependencies, packages);
+                this.rewriteProjectReferencesFullPathVersion(artifactPackFullPath, packageJson.devDependencies, packages);
                 fs.copyFileSync(path.join(packagePath, "package-lock.json"), path.join(tempPath, "package", "package-lock.json"));
+            } else {
+                this.rewriteProjectReferencesVersion(packageJson.dependencies, packages);
+                this.rewriteProjectReferencesVersion(packageJson.devDependencies, packages);
             }
+
+            this.trimPackageJson(packageJson);
+            fs.writeFileSync(packageJsonPath, stringifyPackage(packageJson), 'utf8');
             tar.create({ file: artifactPackTarPath, cwd: tempPath, gzip: true, sync: true, }, ["package"]);
         } finally {
             fs.unlinkSync(sourcePackageTarPath);
             this.rimraf(tempPath);
         }
-    }
-
-    private patchPackageJson(packagePath: string, packageJsonPath: string, artifactPackFullPath: string, packages: PackagesType) {
-        // Resolve all file:-based dependencies to explicit versions
-        const packageJson = this.readPackageJson(packageJsonPath);
-        if (this.isDeploy) {
-            this.rewriteProjectReferencesFullPathVersion(artifactPackFullPath, packageJson.dependencies, packages);
-            this.rewriteProjectReferencesFullPathVersion(artifactPackFullPath, packageJson.devDependencies, packages);
-        } else {
-            this.rewriteProjectReferencesVersion(packageJson.dependencies, packages);
-            this.rewriteProjectReferencesVersion(packageJson.devDependencies, packages);
-        }
-
-        // Remove stuff not needed in "binary" packge
-        delete packageJson.scripts;
-        delete packageJson.blerf;
-        delete packageJson.devDependencies;
-        fs.writeFileSync(packageJsonPath, stringifyPackage(packageJson), 'utf8');
     }
 }
