@@ -27,7 +27,7 @@ export class BundleEnumerator extends PackageEnumerator {
 
         // NOTE: assuming file name of tarball; can also get it from the output of npm pack
         const tempPath = fs.mkdtempSync(path.join(os.tmpdir(), "blerf-"));
-        const artifactPackTarPath = path.join(this.artifactPackPath, packageJson.name + "-" + packageJson.version + ".tgz");
+        const artifactPackTarPath = path.join(this.artifactPackPath, packageJson.name + ".tgz");
         const artifactTarPath = path.join(this.artifactDeployPath, packageJson.name + "-" + packageJson.version + ".tgz");
 
         fs.mkdirSync(this.artifactDeployPath, { recursive: true });

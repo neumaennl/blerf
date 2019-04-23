@@ -1,7 +1,7 @@
 {
   "name": "blerf",
-  "version": "0.0.6",
-  "description": "Blerf monorepo/solution/project management tool. Handle dependencies and run build tasks when source files change. Pack for publish, pack for deployment.",
+  "version": "0.0.7",
+  "description": "Build tool for nodejs monorepos working alongside npm. Helps manage multiple projects in a solution.",
   "author": "andersnm",
   "license": "MIT",
   "repository" : { 

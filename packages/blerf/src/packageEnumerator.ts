@@ -55,6 +55,7 @@ export abstract class PackageEnumerator {
                 for (let dependencyName of Object.keys(packageJson.dependencies)) {
                     const ref = packageJson.dependencies[dependencyName];
                     if (ref.startsWith("file:") && nodes.indexOf(dependencyName) !== -1) {
+                        this.validateFileReference(ref, dependencyName);
                         edges.push([dependencyName, packageJson.name])
                     }
                 }
@@ -64,6 +65,7 @@ export abstract class PackageEnumerator {
                 for (let dependencyName of Object.keys(packageJson.devDependencies)) {
                     const ref = packageJson.devDependencies[dependencyName];
                     if (ref.startsWith("file:") && nodes.indexOf(dependencyName) !== -1) {
+                        this.validateFileReference(ref, dependencyName);
                         edges.push([dependencyName, packageJson.name])
                     }
                 }
@@ -106,6 +108,45 @@ export abstract class PackageEnumerator {
                 }
             }
             fs.rmdirSync(dir_path);
+        }
+    }
+
+    protected validateFileReference(version: string, packageName: string) {
+        const expectedReference = "file:../../artifacts/build/" + packageName + ".tgz";
+        if (version !== expectedReference) {
+            throw new Error("Project reference to " + packageName + " must be \"" + expectedReference + "\"");
+        }
+    }
+
+    protected rewriteProjectReferencesFullPath(artifactPackFullPath: string, packageDependencies: any, packages: PackagesType) {
+        if (!packageDependencies) {
+            return;
+        }
+
+        for (let dependencyName of Object.keys(packageDependencies)) {
+            const ref = packageDependencies[dependencyName];
+            if (!ref.startsWith("file:")) {
+                continue;
+            }
+
+            const dependencyPackageInfo = packages[dependencyName];
+            packageDependencies[dependencyName] = path.join(artifactPackFullPath, dependencyPackageInfo.packageJson.name + ".tgz");
+        }
+    }
+
+    protected rewriteProjectReferencesVersion(packageDependencies: any, packages: PackagesType) {
+        if (!packageDependencies) {
+            return;
+        }
+
+        for (let dependencyName of Object.keys(packageDependencies)) {
+            const ref = packageDependencies[dependencyName];
+            if (!ref.startsWith("file:")) {
+                continue;
+            }
+
+            const dependencyPackageInfo = packages[dependencyName];
+            packageDependencies[dependencyName] = "^" + dependencyPackageInfo.packageJson.version;
         }
     }
 

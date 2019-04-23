@@ -10,26 +10,29 @@ const rootPath = "packages";
 
 (async () => {
 
-    if (process.argv[2] === "run") {
-        const cmd = new RunEnumerator(rootPath, process.argv.slice(3));
-        await cmd.enumeratePackages();
-    } else if (process.argv[2] === "pack:publish") {
-        const cmd = new PackEnumerator(rootPath, "artifacts/publish", "artifacts/publish", false);
-        await cmd.enumeratePackages();
-    } else if (process.argv[2] === "pack:deploy") {
-        const pack = new PackEnumerator(rootPath, "artifacts/deploy-temp", "artifacts/deploy", true);
-        await pack.enumeratePackages();
+    try {
+        if (process.argv[2] === "run") {
+            const cmd = new RunEnumerator(rootPath, process.argv.slice(3));
+            await cmd.enumeratePackages();
+        } else if (process.argv[2] === "pack:publish") {
+            const cmd = new PackEnumerator(rootPath, "artifacts/publish", "artifacts/publish", false);
+            await cmd.enumeratePackages();
+        } else if (process.argv[2] === "pack:deploy") {
+            const pack = new PackEnumerator(rootPath, "artifacts/deploy-temp", "artifacts/deploy", true);
+            await pack.enumeratePackages();
 
-        const bundle = new BundleEnumerator(rootPath, "artifacts/deploy-temp", "artifacts/deploy");
-        await bundle.enumeratePackages();
-    } else if (process.argv[2] === "build") {
-        const cmd = new BuildEnumerator(rootPath);
-        await cmd.enumeratePackages();
-    } else if (process.argv[2] === "test") {
-        const cmd = new TestEnumerator(rootPath);
-        await cmd.enumeratePackages();
-    } else {
-        console.log("usage: blerf [run|install|pack|build|test]")
+            const bundle = new BundleEnumerator(rootPath, "artifacts/deploy-temp", "artifacts/deploy");
+            await bundle.enumeratePackages();
+        } else if (process.argv[2] === "build") {
+            const cmd = new BuildEnumerator(rootPath, "artifacts/build");
+            await cmd.enumeratePackages();
+        } else if (process.argv[2] === "test") {
+            const cmd = new TestEnumerator(rootPath);
+            await cmd.enumeratePackages();
+        } else {
+            console.log("usage: blerf [run|install|pack|build|test]")
+        }
+    } catch (e) {
+        console.error(e);
     }
-
 })();

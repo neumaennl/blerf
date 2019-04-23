@@ -32,7 +32,7 @@ export class PackEnumerator extends PackageEnumerator {
         const sourcePackageTarPath = path.join(packagePath, packageJson.name + "-" + packageJson.version + ".tgz");
         const tempPath = fs.mkdtempSync(path.join(os.tmpdir(), "blerf-"));
 
-        const artifactPackTarPath = path.join(this.artifactPackPath, packageJson.name + "-" + packageJson.version + ".tgz");
+        const artifactPackTarPath = path.join(this.artifactPackPath, packageJson.name + ".tgz");
 
         fs.mkdirSync(this.artifactPackPath, { recursive: true });
 
@@ -49,36 +49,17 @@ export class PackEnumerator extends PackageEnumerator {
         }
     }
 
-    updateDependencyVersions(packagePath: string, artifactPackFullPath: string, packageDependencies: any, packages: PackagesType) {
-        if (!packageDependencies) {
-            return;
-        }
-    
-        for (let dependencyName of Object.keys(packageDependencies)) {
-            const ref = packageDependencies[dependencyName];
-            if (!ref.startsWith("file:")) {
-                continue;
-            }
-    
-            const dependencyPackageInfo = packages[dependencyName];
-            if (dependencyPackageInfo) {
-                if (this.isDeploy) {
-                    packageDependencies[dependencyName] = path.join(artifactPackFullPath, dependencyPackageInfo.packageJson.name + "-" + dependencyPackageInfo.packageJson.version + ".tgz");
-                } else {
-                    packageDependencies[dependencyName] = "^" + dependencyPackageInfo.packageJson.version;
-                }
-            } else {
-                // TODO: possibly noop instead?
-                throw new Error("Expected file:-based reference to a project under ./packages: " + ref);
-            }
-        }
-    }
-    
     private patchPackageJson(packagePath: string, packageJsonPath: string, artifactPackFullPath: string, packages: PackagesType) {
         // Resolve all file:-based dependencies to explicit versions
         const packageJson = this.readPackageJson(packageJsonPath);
-        this.updateDependencyVersions(packagePath, artifactPackFullPath, packageJson.dependencies, packages);
-        this.updateDependencyVersions(packagePath, artifactPackFullPath, packageJson.devDependencies, packages);
+        if (this.isDeploy) {
+            this.rewriteProjectReferencesFullPath(artifactPackFullPath, packageJson.dependencies, packages);
+            this.rewriteProjectReferencesFullPath(artifactPackFullPath, packageJson.devDependencies, packages);
+        } else {
+            this.rewriteProjectReferencesVersion(packageJson.dependencies, packages);
+            this.rewriteProjectReferencesVersion(packageJson.devDependencies, packages);
+        }
+
         // Remove stuff not needed in "binary" packge
         delete packageJson.scripts;
         delete packageJson.blerf;

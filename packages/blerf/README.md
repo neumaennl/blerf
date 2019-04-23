@@ -1,41 +1,27 @@
 # blerf
 
-Opinionated build tool for nodejs monorepos working alongside npm. Helps manage multiple projects in a solution. Intended for (but probably not limited to) TypeScript development.
+Build tool for nodejs monorepos working alongside npm. Helps manage multiple projects in a solution. Intended for (but probably not limited to) TypeScript development.
 
 ## Features
 
 - Monorepo tool: Run npm scripts in multiple projects, in topological order
 - Build system: Run build steps only when something changed
 - Dependency management: Run `npm install` as part of the build only when something changed
+- Project dependencies: Install the build output of local projects
 - Artifacts: Run `npm pack` in multiple projects and fix up local project references
 - Run tests with native V8 code coverage
-- Resilience: Detect and recover from node_modules corruption
 
 ## Commands
 
 ### `blerf build`
 
-Installs dependencies and executes any build steps in each directory under ./packages containing a package.json.
+Installs dependencies, executes any build steps and creates a tarball for each directory under ./packages containing a package.json.
 
-Dependencies are skipped if all top level dependencies are present in a project's node_modules folder. Detects and recovers from certain types of corruption in package-lock.json. Uses `npm install` under the hood.
+Dependencies are skipped if there are no changes. Regular dependencies are checked if the installed version matches the declared semver range. Project dependencies are checked if the tarball timestamp if newer than the installed module directory. If the tarball has changed, the project is removed from node_modules and package-lock before reinstalling. Uses `npm install` under the hood.
 
 Build steps are specified in package.json. Build steps are skipped if there are no changes in the filesystem based on the glob patterns in `srcPath` and `outPath`. The code in `script` is spawned similar to npm scripts, where the PATH environment variable is modified to include node_modules/.bin.
 
-Example blerf section in package.json with a build step for TypeScript:
-
-```json
-"blerf": {
-    "steps": [
-        {
-            "outPath": "lib/**/*.js",
-            "srcPath": [ "src/**/*.ts", "tsconfig.json", "package.json"],
-            "script": "tsc"
-        }
-    ]
-}
-```
-
-The values for outPath and srcPath must match the tsconfig.json compiler options.
+After a project builds successfully, a tarball is created in created in ./artifacts/build. The final tarballs will have fixed project references with absolute paths to the corresponding build output. Uses `npm pack` under the hood.
 
 ### `blerf pack:publish`
 
@@ -72,9 +58,10 @@ Basic conventions and guidelines:
 - Create a root package.json with a dependency on blerf and scripts to build, test, pack and deploy
 - Create new projects in directories under ./packages
 - Create test projects separately under ./packages
-- Add project references as dependencies using relative `file:` references in package.json
+- Add project references as `file:../../artifacts/build/(projectname).tgz` dependencies in package.json
 - Add npm package references as dependencies by editing package.json manually
 - Bootstrap the repo once with `npm install`, then use `blerf build` to install dependencies and build the solution
+- Edit-compile-run cycle
 
 ## Release workflow
 
@@ -82,36 +69,26 @@ Basic conventions and guidelines:
 - Use `blerf pack:publish` instead of `npm pack` to create tarball(s)
 - Use `npm login` / `npm publish`
 
-## npm error recovery
+## Project dependencies
 
-`blerf build` automatically detects and recovers from certain situations where `npm install` would otherwise fail:
+Any dependencies starting with `file:` is assumed to be a project reference, and must point at the corresponding tarball from the build output. The project reference must be formatted like `file:../../artifacts/build/(projectname).tgz`. The project name must be the same as the dependency name.
 
-### Removed dependency in referenced project
+`blerf build` automatically detects changes in project dependencies, and automates all steps necessary to reinstall.
 
-When a dependency is removed from a project, it still lingers in package-lock of projects depending on it. This causes `npm install` to return an error like this:
+## Build steps
 
-```
-Error: ENOENT: no such file or directory, rename XXX --> YYY
-```
+Example blerf section in package.json with a build step for TypeScript:
 
-Resolved by removing the project reference from package-lock.json and issue a reinstall.
-
-### Corrupted package-lock.json
-
-Another issue also seems to occur after removing dependencies in projects that depend on each other, but has not not reproduced consistently. In this case, there are corrupted entries in package-lock lacking a version field, and  `npm install` will return an error like this:
-
-```
-ERR! Cannot read property 'match' of undefined
-```
-
-Resolved by removing the project reference from package-lock.json and issue a reinstall.
-
-### Non-symlink project referencess
-
-If a 'file:'-based dependency is somehow installed as a directory rather than a symlink, `npm install` will return an error like this:
-
-```
-ERR! enoent ENOENT: no such file or directory, rename XXX -> YYY
+```json
+"blerf": {
+    "steps": [
+        {
+            "outPath": "lib/**/*.js",
+            "srcPath": [ "src/**/*.ts", "tsconfig.json", "package.json"],
+            "script": "tsc"
+        }
+    ]
+}
 ```
 
-Resolved by removing the installed directory from node_modules and issue a reinstall.
+The values for outPath and srcPath must match the tsconfig.json compiler options.

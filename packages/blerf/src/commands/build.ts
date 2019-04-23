@@ -1,10 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import * as childProcess from 'child_process';
 import { PackageEnumerator, PackagesType } from "../packageEnumerator";
 const glob = require('fast-glob');
 const semver = require('semver');
 const stringifyPackage = require("stringify-package");
+const tar = require('tar')
 
 interface IBuildStep {
     srcPath?: string|string[];
@@ -13,37 +15,55 @@ interface IBuildStep {
 }
 
 export class BuildEnumerator extends PackageEnumerator {
-    constructor(rootPath: string) {
+    private artifactBuildPath: string;
+
+    constructor(rootPath: string, artifactBuildPath: string) {
         super(rootPath);
+        this.artifactBuildPath = artifactBuildPath;
     }
 
     protected async processPackage(packagePath: string, packageJson: any, packages: PackagesType): Promise<void> {
-        if (this.needsNpmInstall(packagePath, packageJson, packages)) {
+        console.log("blerf: building", packageJson.name);
+        let shouldInstall = false;
+        const refreshProjects: string[] = [];
+        shouldInstall = this.shouldInstallOutdatedProjectReferences(packagePath, packageJson.dependencies, refreshProjects) || shouldInstall;
+        shouldInstall = this.shouldInstallOutdatedProjectReferences(packagePath, packageJson.devDependencies, refreshProjects) || shouldInstall;
+
+        shouldInstall = shouldInstall || this.needsNpmInstallDependencies(packageJson.dependencies, packagePath);
+        shouldInstall = shouldInstall || this.needsNpmInstallDependencies(packageJson.devDependencies, packagePath);
+
+        if (shouldInstall) {
+            this.cleanOutdatedProjectReferences(packagePath, refreshProjects);
+
             console.log("blerf: installing " + packageJson.name);
-            childProcess.execSync("npm install", {stdio: 'inherit', cwd: packagePath});
-        } else {
-            console.log("blerf: " + packageJson.name + " node_modules up to date");
+            childProcess.execSync("npm install --offline", {stdio: 'inherit', cwd: packagePath});
         }
 
-        if (!packageJson.blerf || !packageJson.blerf.steps) {
-            if (!packageJson.scripts || !packageJson.scripts.build) {
-                console.log("blerf: no blerf section and no build script in package.json. skipping.");
-                return;
+        const targetTarPath = path.join(this.artifactBuildPath,  packageJson.name + ".tgz");
+
+        let shouldPack = !fs.existsSync(targetTarPath);
+
+        if (packageJson.blerf && packageJson.blerf.steps) {
+            if (!Array.isArray(packageJson.blerf.steps)) {
+                throw new Error("blerf.steps must be an array");
             }
-            childProcess.execSync("npm run build", {stdio: 'inherit', cwd: packagePath});
-            return;
+
+            for (let step of packageJson.blerf.steps as IBuildStep[]) {
+                shouldPack = await this.processBuildStep(packagePath, step) || shouldPack;
+            }
+        } else {
+            if (packageJson.scripts && packageJson.scripts.build) {
+                childProcess.execSync("npm run build", {stdio: 'inherit', cwd: packagePath});
+                shouldPack = true;
+            }
         }
 
-        if (!Array.isArray(packageJson.blerf.steps)) {
-            throw new Error("blerf.steps must be an array");
-        }
-
-        for (let step of packageJson.blerf.steps as IBuildStep[]) {
-            await this.processBuildStep(packagePath, step);
+        if (shouldPack) {
+            this.packBuildArtifact(packagePath, packageJson, packages, targetTarPath);
         }
     }
 
-    private async processBuildStep(packagePath: string, step: IBuildStep): Promise<void> {
+    private async processBuildStep(packagePath: string, step: IBuildStep): Promise<boolean> {
         let srcPath: string[];
         if (Array.isArray(step.srcPath)) {
             srcPath = step.srcPath;
@@ -85,233 +105,87 @@ export class BuildEnumerator extends PackageEnumerator {
 
             if (step.script) {
                 childProcess.execSync(step.script, {stdio: 'inherit', cwd: packagePath, env: env });
+                return true;
             }
         } else {
             console.log("blerf: no modifications. skipping", step.script, "in", packagePath);
-        }
-    }
-
-    private needsNpmInstall(packagePath: string, packageJson: any, packages: PackagesType): boolean {
-
-        // Workaround errors during npm install with file: references in package-lock.json, f.ex this error message:
-        // verbose stack Error: ENOENT: no such file or directory, rename 'd:\Code\festtest\lib-b\node_modules\.staging\lib-a-3f8fcb24\node_modules\@babel\code-frame' -> 'd:\Code\festtest\lib-b\node_modules\.staging\@babel\code-frame-7800f1dd'
-        // This occurs when installing a project which depends on a file:-based library, and dependencies were changed/removed from the library.
-
-        // And this error message:
-        // npm ERR! Cannot read property 'match' of undefined
-        // This also occurs when installing a project which depends on a file:-based library, and there were changes in the library dependencies.
-        // Haven't been able to reproduce this. There were bogus entries for dependencies of a file:-based reference without version:
-        // "version": "file:../project",
-        // ...
-        // "dependencies": {
-        //   ...
-        //   "@babel/core": {
-        //     "bundled": true
-        //   }, 
-
-        // To resolve both of these, remove file:-based entries in the parent package-lock and run npm install, but only
-        // if there are differences between the local and dependency package-lock.json.
-
-        let packageLockJson: any;
-        try {
-            packageLockJson = this.readPackageJson(path.join(packagePath, "package-lock.json"));
-        } catch (e) {
-            packageLockJson = null;
-        }
-
-        let savePackageLockJson = false;
-        if (packageLockJson && packageLockJson.dependencies) {
-            for (const dependencyName of Object.keys(packageLockJson.dependencies)) {
-
-                const dependencyInfo = packageLockJson.dependencies[dependencyName];
-                if (typeof dependencyInfo.version !== "string") {
-                    console.log("blerf: recovering from npm error scenario: invalid version. package-lock.json has been modified.");
-                    savePackageLockJson = true;
-                    delete packageLockJson.dependencies[dependencyName];
-                    continue;
-                }
-
-                if (dependencyInfo.version.startsWith("file:")) {
-                    const dependencyPackageInfo = packages[dependencyName];
-                    if (!dependencyPackageInfo) {
-                        continue;
-                    }
-
-                    const dependencyPackageLockJsonPath = path.join(dependencyPackageInfo.packagePath, "package-lock.json");
-                    if (!fs.existsSync(dependencyPackageLockJsonPath)) {
-                        continue;
-                    }
-
-                    const dependencyPackageLockJson = this.readPackageJson(dependencyPackageLockJsonPath);
-
-                    // Compare the referenced package-lock.json with package-lock.json if anything was removed in the other project
-                    // dependencyInfo = local entry for project reference and its dependencies
-                    // dependencyPackageLockJson = actual project reference and its dependencies
-                    if (!this.compareLockDependencies(dependencyInfo.dependencies, dependencyPackageLockJson.dependencies)) {
-                        console.log("blerf: recovering from npm error scenario: lock file project dependencies mismatch. package-lock.json has been modified.")
-                        delete packageLockJson.dependencies[dependencyName];
-                        savePackageLockJson = true;
-                        continue;
-                    }
-                }
-            }
-        }
-
-        let shouldInstall = false;
-
-        if (savePackageLockJson) {
-            fs.writeFileSync(path.join(packagePath, "package-lock.json"), stringifyPackage(packageLockJson), 'utf8');
-            shouldInstall = true;
-        }
-
-        // Another npm install error recovery scenario: if a file:-based dependency has been installed in a directory instead of symlink
-        if (packageJson.dependencies) {
-            shouldInstall = this.fixNonSymlinkFileDependencies(packageJson.dependencies, packagePath) || shouldInstall;
-        }
-
-        if (packageJson.devDependencies) {
-            shouldInstall = this.fixNonSymlinkFileDependencies(packageJson.devDependencies, packagePath) || shouldInstall;
-        }
-
-        if (shouldInstall) {
-            return true;
-        }
-
-        // Check the top level dependencies in package.json matches the contents of node_modules
-        if (packageJson.dependencies) {
-            if (this.needsNpmInstallDependencies(packageJson.dependencies, packagePath)) {
-                return true;
-            }
-        }
-
-        if (packageJson.devDependencies) {
-            if (this.needsNpmInstallDependencies(packageJson.devDependencies, packagePath)) {
-                return true;
-            }
-        }
-
-        // Compare package.json with package-lock.json if anything was removed in the local project
-        if (packageLockJson && packageLockJson.dependencies) {
-            const topLevelDependencies = this.getTopLevelDependencies(packageLockJson.dependencies);
-            if (!this.hasAllDependencies(packageJson, topLevelDependencies)) {
-                console.log("blerf: requires install: top level dependency in package-lock.json missing from package.json")
-                return true;
-            }
         }
 
         return false;
     }
 
-    private compareLockDependencies(localDependencies: any, refDependencies: any) {
-
-        if (localDependencies === undefined && !!refDependencies) {
-            // npm 6.8.0 addresses the issues being worked around here, and the local lockfile has no dependencies in file:-based references
-            // Local project has no dependencies, referenced project has dependencies. Nothing to check.
-            return true;
-        }
-
-        if (!localDependencies || !refDependencies) {
-            // Project has no dependencies in either lockfile. Nothing to check.
-            return true;
-        }
-
-        // Check no dependencies were removed or modified
-        for (let refDependencyName of Object.keys(refDependencies)) {
-            const localDependencyInfo = localDependencies[refDependencyName];
-            const refDependencyInfo = refDependencies[refDependencyName];
-            if (!this.compareLockDependencyInfo(localDependencyInfo, refDependencyInfo)) {
-                return false;
-            }
-        }
-
-        for (let localDependencyName of Object.keys(localDependencies)) {
-            const localDependencyInfo = localDependencies[localDependencyName];
-            const refDependencyInfo = refDependencies[localDependencyName];
-            if (!this.compareLockDependencyInfo(localDependencyInfo, refDependencyInfo)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private compareLockDependencyInfo(localDependencyInfo: any, refDependencyInfo: any) {
-        if (!localDependencyInfo || !refDependencyInfo) {
-            return false;
-        }
-
-        if (localDependencyInfo.version !== refDependencyInfo.version) {
-            return false;
-        }
-
-        return true;
-    }
-
-    private hasAllDependencies(packageJson: any, dependencyNames: string[]) {
-        for (const dependencyName of dependencyNames) {
-            if (!this.hasDependency(packageJson, dependencyName)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private hasDependency(packageJson: any, dependencyName: string) {
-        const isInDependencies = packageJson.dependencies && !!packageJson.dependencies[dependencyName];
-        const isInDevDependencies = packageJson.devDependencies && !!packageJson.devDependencies[dependencyName];
-        return isInDependencies || isInDevDependencies;
-    }
-
-    private getTopLevelDependencies(dependencies: any): string[] {
-        const nonTopLevelNames: string[] = [];
-        this.scanNonTopLevelDependencies(dependencies, nonTopLevelNames);
-
-        const result: string[] = [];
-        for (const dependencyName of Object.keys(dependencies)) {
-            if (nonTopLevelNames.indexOf(dependencyName) !== -1) {
+    private shouldInstallOutdatedProjectReferences(packagePath: string, dependencies: {[name: string]: string}, outdatedDependencies: string[]): boolean {
+        let shouldInstall = false;
+        for (let dependencyName of Object.keys(dependencies)) {
+            const ref = dependencies[dependencyName];
+            if (!ref.startsWith("file:")) {
                 continue;
             }
 
-            result.push(dependencyName);
+            const tarball = path.join(packagePath, ref.substr(5));
+            const dependencyPath = path.join(packagePath, "node_modules", dependencyName);
+            if (!fs.existsSync(dependencyPath)) {
+                shouldInstall = true;
+                continue;
+            }
+
+            if (!fs.existsSync(tarball)) {
+                throw new Error("Unable to build project. Dependency tarball does not exist.");
+            }
+
+            const depTime = fs.lstatSync(dependencyPath).mtimeMs;
+            const tarTime = fs.lstatSync(tarball).mtimeMs;
+            if (tarTime > depTime) {
+                outdatedDependencies.push(dependencyName);
+                shouldInstall = true;
+            }
         }
 
-        return result;
+        return shouldInstall;
     }
 
-    private scanNonTopLevelDependencies(dependencies: any, nonTopLevelNames: string[]) {
-        for (const dependencyName of Object.keys(dependencies)) {
-            const dependencyInfo = dependencies[dependencyName];
-            if (dependencyInfo.requires) {
-                for (const dependencyRequireName of Object.keys(dependencyInfo.requires)) {
-                    if (nonTopLevelNames.indexOf(dependencyRequireName) === -1) {
-                        nonTopLevelNames.push(dependencyRequireName);
-                    }
-                }
-            }
+    private cleanOutdatedProjectReferences(packagePath: string, outdatedDependencies: string[]) {
+        let packageLockJson: any = null;
+        try {
+            packageLockJson = this.readPackageJson(path.join(packagePath, "package-lock.json"));
+        } catch (e) {}
 
-            if (dependencyInfo.dependencies) {
-                this.scanNonTopLevelDependencies(dependencyInfo.dependencies, nonTopLevelNames);
+        for (let dependencyName of outdatedDependencies) {
+            console.log("blerf: refreshing project reference", dependencyName);
+            const dependencyPath = path.join(packagePath, "node_modules", dependencyName);
+            this.rimraf(dependencyPath);
+
+            if (packageLockJson && packageLockJson.dependencies) {
+                delete packageLockJson.dependencies[dependencyName];
             }
+        }
+
+        if (packageLockJson) {
+            fs.writeFileSync(path.join(packagePath, "package-lock.json"), stringifyPackage(packageLockJson), 'utf8');
         }
     }
 
-    private fixNonSymlinkFileDependencies(dependencies: {[name: string]: string}, packagePath: string): boolean {
-        let recovered = false;
-        for (let dependencyName of Object.keys(dependencies)) {
-            const dependencyVersion = dependencies[dependencyName];
+    private packBuildArtifact(packagePath: string, packageJson: any, packages: PackagesType, targetTarPath: string) {
+        childProcess.execSync("npm pack", {stdio: 'inherit', cwd: packagePath});
 
-            if (dependencyVersion.startsWith("file:")) {
-                const dependencyNodePath = path.join(packagePath, "node_modules", dependencyName);
-                if (fs.existsSync(dependencyNodePath) && !fs.lstatSync(dependencyNodePath).isSymbolicLink()) {
-                    console.log("blerf: recovering from npm error scenario: 'file:'-dependency exists in node_modules, but is not a symlink");
-                    this.rimraf(dependencyNodePath);
-                    recovered = true;
-                }
-            }
+        const sourceTarPath = path.join(packagePath, packageJson.name + "-" + packageJson.version + ".tgz");
+        fs.mkdirSync(this.artifactBuildPath, { recursive: true });
+
+        const tempPath = fs.mkdtempSync(path.join(os.tmpdir(), "blerf-"));
+        try {
+            tar.extract({ file: sourceTarPath, cwd: tempPath, sync: true });
+
+            const packageJsonPath = path.join(tempPath, "package", "package.json");
+            const packageJson = this.readPackageJson(packageJsonPath);
+            this.rewriteProjectReferencesFullPath(path.resolve(this.artifactBuildPath), packageJson.dependencies, packages);
+            this.rewriteProjectReferencesFullPath(path.resolve(this.artifactBuildPath), packageJson.devDependencies, packages);
+            fs.writeFileSync(packageJsonPath, stringifyPackage(packageJson), 'utf8');
+
+            tar.create({ file: targetTarPath, cwd: tempPath, gzip: true, sync: true, }, ["package"]);
+        } finally {
+            this.rimraf(tempPath);
+            fs.unlinkSync(sourceTarPath);
         }
-
-        return recovered;
     }
 
     private needsNpmInstallDependencies(dependencies: {[name: string]: string}, packagePath: string): boolean {
