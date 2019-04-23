@@ -32,7 +32,7 @@ export class PackEnumerator extends PackageEnumerator {
         const sourcePackageTarPath = path.join(packagePath, packageJson.name + "-" + packageJson.version + ".tgz");
         const tempPath = fs.mkdtempSync(path.join(os.tmpdir(), "blerf-"));
 
-        const artifactPackTarPath = path.join(this.artifactPackPath, packageJson.name + ".tgz");
+        const artifactPackTarPath = path.join(this.artifactPackPath, packageJson.name + "-" + packageJson.version + ".tgz");
 
         fs.mkdirSync(this.artifactPackPath, { recursive: true });
 
@@ -53,8 +53,8 @@ export class PackEnumerator extends PackageEnumerator {
         // Resolve all file:-based dependencies to explicit versions
         const packageJson = this.readPackageJson(packageJsonPath);
         if (this.isDeploy) {
-            this.rewriteProjectReferencesFullPath(artifactPackFullPath, packageJson.dependencies, packages);
-            this.rewriteProjectReferencesFullPath(artifactPackFullPath, packageJson.devDependencies, packages);
+            this.rewriteProjectReferencesFullPathVersion(artifactPackFullPath, packageJson.dependencies, packages);
+            this.rewriteProjectReferencesFullPathVersion(artifactPackFullPath, packageJson.devDependencies, packages);
         } else {
             this.rewriteProjectReferencesVersion(packageJson.dependencies, packages);
             this.rewriteProjectReferencesVersion(packageJson.devDependencies, packages);

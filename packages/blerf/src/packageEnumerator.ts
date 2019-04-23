@@ -134,6 +134,22 @@ export abstract class PackageEnumerator {
         }
     }
 
+    protected rewriteProjectReferencesFullPathVersion(artifactPackFullPath: string, packageDependencies: any, packages: PackagesType) {
+        if (!packageDependencies) {
+            return;
+        }
+
+        for (let dependencyName of Object.keys(packageDependencies)) {
+            const ref = packageDependencies[dependencyName];
+            if (!ref.startsWith("file:")) {
+                continue;
+            }
+
+            const dependencyPackageInfo = packages[dependencyName];
+            packageDependencies[dependencyName] = path.join(artifactPackFullPath, dependencyPackageInfo.packageJson.name + "-" + dependencyPackageInfo.packageJson.version + ".tgz");
+        }
+    }
+
     protected rewriteProjectReferencesVersion(packageDependencies: any, packages: PackagesType) {
         if (!packageDependencies) {
             return;
