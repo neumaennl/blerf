@@ -36,7 +36,7 @@ export class BuildEnumerator extends PackageEnumerator {
             this.cleanOutdatedProjectReferences(packagePath, refreshProjects);
 
             console.log("blerf: installing " + packageJson.name);
-            childProcess.execSync("npm install --offline", {stdio: 'inherit', cwd: packagePath});
+            childProcess.execSync("npm install", {stdio: 'inherit', cwd: packagePath});
         }
 
         const targetTarPath = path.join(this.artifactBuildPath,  packageJson.name + ".tgz");
@@ -125,6 +125,13 @@ export class BuildEnumerator extends PackageEnumerator {
             const tarball = path.join(packagePath, ref.substr(5));
             const dependencyPath = path.join(packagePath, "node_modules", dependencyName);
             if (!fs.existsSync(dependencyPath)) {
+                outdatedDependencies.push(dependencyName);
+                shouldInstall = true;
+                continue;
+            }
+
+            if (fs.lstatSync(dependencyPath).isSymbolicLink()) {
+                outdatedDependencies.push(dependencyName);
                 shouldInstall = true;
                 continue;
             }
