@@ -1,17 +1,26 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import * as childProcess from 'child_process';
-import { PackageEnumerator, PackagesType } from "../packageEnumerator";
+import { PackageEnumerator, PackagesType, PackageInfoType, PackageDependencyInfoType } from "../packageEnumerator";
 const glob = require('fast-glob');
 const semver = require('semver');
 const stringifyPackage = require("stringify-package");
 const tar = require('tar')
+const ssri = require('ssri')
 
 interface IBuildStep {
     srcPath?: string|string[];
     outPath?: string|string[];
     script?: string;
+}
+
+interface IProjectReference {
+    name: string;
+    isInstalled: boolean;
+    isOutdated: boolean;
+    hasDependencyChanges: boolean;
 }
 
 export class BuildEnumerator extends PackageEnumerator {
@@ -24,20 +33,8 @@ export class BuildEnumerator extends PackageEnumerator {
 
     protected async processPackage(packagePath: string, packageJson: any, packages: PackagesType): Promise<void> {
         console.log("blerf: building", packageJson.name);
-        let shouldInstall = false;
-        const refreshProjects: string[] = [];
-        shouldInstall = this.shouldInstallOutdatedProjectReferences(packagePath, packageJson.dependencies, refreshProjects) || shouldInstall;
-        shouldInstall = this.shouldInstallOutdatedProjectReferences(packagePath, packageJson.devDependencies, refreshProjects) || shouldInstall;
 
-        shouldInstall = shouldInstall || this.needsNpmInstallDependencies(packageJson.dependencies, packagePath);
-        shouldInstall = shouldInstall || this.needsNpmInstallDependencies(packageJson.devDependencies, packagePath);
-
-        if (shouldInstall) {
-            this.cleanOutdatedProjectReferences(packagePath, refreshProjects);
-
-            console.log("blerf: installing " + packageJson.name);
-            childProcess.execSync("npm install", {stdio: 'inherit', cwd: packagePath});
-        }
+        this.installBeforeBuild(packages[packageJson.name], packages);
 
         const targetTarPath = path.join(this.artifactBuildPath,  packageJson.name + ".tgz");
 
@@ -114,66 +111,156 @@ export class BuildEnumerator extends PackageEnumerator {
         return false;
     }
 
-    private shouldInstallOutdatedProjectReferences(packagePath: string, dependencies: {[name: string]: string}, outdatedDependencies: string[]): boolean {
-        let shouldInstall = false;
-        for (let dependencyName of Object.keys(dependencies)) {
-            const ref = dependencies[dependencyName];
-            if (!ref.startsWith("file:")) {
+    private getProjectReferences(packageInfo: PackageInfoType, packages: PackagesType): IProjectReference[] {
+        const result: IProjectReference[] = [];
+        for (let dependencyName of Object.keys(packageInfo.dependencies)) {
+            const installedDependencyPackageInfo = packageInfo.dependencies[dependencyName];
+            const ref = installedDependencyPackageInfo.version;
+            if (!ref || !ref.startsWith("file:")) {
                 continue;
             }
 
-            const tarball = path.join(packagePath, ref.substr(5));
-            const dependencyPath = path.join(packagePath, "node_modules", dependencyName);
-            if (!fs.existsSync(dependencyPath)) {
-                outdatedDependencies.push(dependencyName);
-                shouldInstall = true;
-                continue;
-            }
-
-            if (fs.lstatSync(dependencyPath).isSymbolicLink()) {
-                outdatedDependencies.push(dependencyName);
-                shouldInstall = true;
-                continue;
-            }
-
+            const tarball = path.join(packageInfo.packagePath, ref.substr(5));
             if (!fs.existsSync(tarball)) {
                 throw new Error("Unable to build project. Dependency tarball does not exist.");
             }
 
-            const depTime = fs.lstatSync(dependencyPath).mtimeMs;
-            const tarTime = fs.lstatSync(tarball).mtimeMs;
-            if (tarTime > depTime) {
-                outdatedDependencies.push(dependencyName);
-                shouldInstall = true;
+            const dependencyPath = path.join(packageInfo.packagePath, "node_modules", dependencyName);
+
+            const currentDependencyPackageInfo = packages[dependencyName];
+
+            let isOutdated = false;
+            let isInstalled = false;
+            let hasDependencyChanges = false;
+
+            if (!installedDependencyPackageInfo.packageJson) {
+                isOutdated = true;
+                hasDependencyChanges = true;
+            } else
+            if (fs.lstatSync(dependencyPath).isSymbolicLink()) {
+                isOutdated = true;
+                isInstalled = true;
+                hasDependencyChanges = true;
+            } else {
+                isInstalled = true;
+
+                const depTime = fs.lstatSync(dependencyPath).mtimeMs;
+                const tarTime = fs.lstatSync(tarball).mtimeMs;
+                if (tarTime > depTime) {
+                    isOutdated = true;
+                    hasDependencyChanges = this.hasDependencyChanges(installedDependencyPackageInfo, currentDependencyPackageInfo);
+                }
             }
+
+            result.push({
+                name: dependencyName,
+                isInstalled: isInstalled,
+                isOutdated: isOutdated,
+                hasDependencyChanges: hasDependencyChanges,
+            });
         }
 
-        return shouldInstall;
+        return result;
     }
 
-    private cleanOutdatedProjectReferences(packagePath: string, outdatedDependencies: string[]) {
-        let packageLockJson: any = null;
-        try {
-            packageLockJson = this.readPackageJson(path.join(packagePath, "package-lock.json"));
-        } catch (e) {}
+    private hasDependencyChanges(localProjectInfo: PackageDependencyInfoType, dependencyProjectInfo: PackageInfoType) {
+        const localDependencyNames = Object.keys(localProjectInfo.projectReferenceDependencies);
+        const dependencyDependencyNames = Object.keys(dependencyProjectInfo.packageJson.dependencies);
+        if (localDependencyNames.length !== dependencyDependencyNames.length) {
+            return true;
+        }
 
-        for (let dependencyName of outdatedDependencies) {
-            console.log("blerf: refreshing project reference", dependencyName);
-            const dependencyPath = path.join(packagePath, "node_modules", dependencyName);
-            this.rimraf(dependencyPath);
+        for (let dependencyName of localDependencyNames) {
+            const dependencyDependencyInfo = dependencyProjectInfo.dependencies[dependencyName];
+            if (!dependencyDependencyInfo) {
+                return true;
+            }
 
-            if (packageLockJson && packageLockJson.dependencies) {
-                delete packageLockJson.dependencies[dependencyName];
+            if (dependencyDependencyInfo.version && dependencyDependencyInfo.version.startsWith("file:")) {
+                continue;
+            }
+
+            const localDependencyVersion = localProjectInfo.projectReferenceDependencies[dependencyName];
+            if (localDependencyVersion !== dependencyDependencyInfo.version) {
+                return true;
             }
         }
 
-        if (packageLockJson) {
-            fs.writeFileSync(path.join(packagePath, "package-lock.json"), stringifyPackage(packageLockJson), 'utf8');
+        return false;
+    }
+
+    private installBeforeBuild(packageInfo: PackageInfoType, packages: PackagesType) {
+        // fast refresh project reference if:
+        //   - tarball is newer, and NO sub dependency changes
+
+        // reinstall project reference if:
+        //   - tarball is newer, and sub dependency changes
+
+        // install if:
+        //   - local project has changed dependencies
+        //     - version mismatches
+        //     - removed dependency
+
+        const projectReferences = this.getProjectReferences(packageInfo, packages);
+
+        const refreshProjectReferences = projectReferences.filter(p => p.isOutdated);
+        const fastRefreshProjectReferences = refreshProjectReferences.filter(p => p.isInstalled && !p.hasDependencyChanges);
+
+        let shouldInstall = false;
+        const installPackages: string[] = [];
+        if (refreshProjectReferences.length > 0) {
+            const names = refreshProjectReferences.map(p => p.name);
+            if (refreshProjectReferences.length === fastRefreshProjectReferences.length) {
+                console.log("blerf: fast refresh", names.join(" "));
+                // delete from node_modules, unpack directly; update hash in lockfile?
+                const integrities: {[key: string]: string} = {};
+                for (let refreshProjectReference of refreshProjectReferences) {
+                    const dependencyPath = path.join(packageInfo.packagePath, "node_modules", refreshProjectReference.name);
+                    this.rimraf(dependencyPath);
+
+                    const sourceTarPath = path.join(this.artifactBuildPath,  refreshProjectReference.name + ".tgz");
+
+                    fs.mkdirSync(dependencyPath, { recursive: true });
+                    tar.extract({ file: sourceTarPath, cwd: dependencyPath, sync: true, strip: 1, filter: (path: string, entry: any) => !path.endsWith("package.json")  });
+
+                    integrities[refreshProjectReference.name] = ssri.fromData(fs.readFileSync(sourceTarPath));
+                }
+
+                this.updatePackageLockIntegrities(packageInfo.packagePath, integrities);
+            } else {
+                console.log("blerf: refresh project reference with npm install");
+                installPackages.push(...names);
+                shouldInstall = true;
+            }
+        } else {
+            shouldInstall = this.needsNpmInstallDependencies(packageInfo);
         }
+
+        if (shouldInstall) {
+            console.log("blerf: installing " + packageInfo.packageJson.name);
+            childProcess.execSync("npm install " + installPackages.join(" "), {stdio: 'inherit', cwd: packageInfo.packagePath});
+        }
+    }
+
+    private updatePackageLockIntegrities(packagePath: string, integrities: {[key: string]: string}) {
+        let packageLockJson: any = this.readPackageJson(path.join(packagePath, "package-lock.json"));
+        if (!packageLockJson || !packageLockJson.dependencies) {
+            return ;
+        }
+
+        for (let dependencyName of Object.keys(integrities)) {
+            const dep = packageLockJson.dependencies[dependencyName];
+            if (dep && dep.integrity) {
+                console.log("blerf: replacing integrity", dep.integrity, integrities[dependencyName])
+                dep.integrity = integrities[dependencyName];
+            }
+        }
+
+        fs.writeFileSync(path.join(packagePath, "package-lock.json"), stringifyPackage(packageLockJson), 'utf8');
     }
 
     private packBuildArtifact(packagePath: string, packageJson: any, packages: PackagesType, targetTarPath: string) {
-        childProcess.execSync("npm pack", {stdio: 'inherit', cwd: packagePath});
+        childProcess.execSync("npm pack --loglevel error", {stdio: 'inherit', cwd: packagePath});
 
         const sourceTarPath = path.join(packagePath, packageJson.name + "-" + packageJson.version + ".tgz");
         fs.mkdirSync(this.artifactBuildPath, { recursive: true });
@@ -196,25 +283,23 @@ export class BuildEnumerator extends PackageEnumerator {
         }
     }
 
-    private needsNpmInstallDependencies(dependencies: {[name: string]: string}, packagePath: string): boolean {
-        for (let dependencyName of Object.keys(dependencies)) {
-            const dependencyVersion = dependencies[dependencyName];
+    private needsNpmInstallDependencies(packageInfo: PackageInfoType): boolean {
+        for (let dependencyName of Object.keys(packageInfo.dependencies)) {
+            const dependencyInfo = packageInfo.dependencies[dependencyName];
 
-            const dependencyPackageJsonPath = path.join(packagePath, "node_modules", dependencyName, "package.json");
-            if (!fs.existsSync(dependencyPackageJsonPath)) {
-                console.log("blerf: " + dependencyName + "@" + dependencyVersion + " is not installed");
+            if (!dependencyInfo.packageJson) {
+                console.log("blerf: " + dependencyName + "@" + dependencyInfo.version + " is not installed");
                 return true;
             }
 
-            if (dependencyVersion.startsWith("file:")) {
+            if (dependencyInfo.version.startsWith("file:")) {
                 // project refs usually dont need installation, except initially,
                 // or if is a tool and does not have a .bin entry
                 continue;
             }
 
-            const dependencyPackageJson = this.readPackageJson(dependencyPackageJsonPath);
-            if (!semver.satisfies(dependencyPackageJson.version, dependencyVersion)) {
-                console.log("blerf: " + dependencyName + "@" + dependencyVersion + " is not satisfied by " + dependencyPackageJson.version);
+            if (!semver.satisfies(dependencyInfo.packageJson.version, dependencyInfo.version)) {
+                console.log("blerf: " + dependencyName + "@" + dependencyInfo.version + " is not satisfied by " + dependencyInfo.packageJson.version);
                 return true;
             }
         }

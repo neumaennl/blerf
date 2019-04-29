@@ -4,7 +4,7 @@
   "description": "Build tool for nodejs monorepos working alongside npm. Helps manage multiple projects in a solution.",
   "author": "andersnm",
   "license": "MIT",
-  "repository" : { 
+  "repository": {
     "type": "git",
     "url": "https://github.com/andersnm/blerf.git"
   },
@@ -30,6 +30,7 @@
     "semver": "^6.0.0",
     "source-map-resolve": "^0.5.2",
     "source-map": "^0.7.3",
+    "ssri": "^6.0.1",
     "v8-to-istanbul": "^2.0.4"
   },
   "blerf": {

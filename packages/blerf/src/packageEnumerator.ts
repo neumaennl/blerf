@@ -2,7 +2,22 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { toposort } from './toposort';
 
-export type PackageInfoType = { packagePath: string, packageJson: any };
+export type PackageDependencyInfoType = {
+    version:string,
+    packagePath: string,
+    packageJson: any,
+    dev: boolean,
+    projectReferenceDependencies: { [packageName: string]: string };
+}
+
+export type PackageDependenciesType = { [packageName: string]: PackageDependencyInfoType };
+
+export type PackageInfoType = { 
+    packagePath: string,
+    packageJson: any,
+    dependencies: PackageDependenciesType,
+};
+
 export type PackagesType = { [packageName: string]: PackageInfoType };
 
 export abstract class PackageEnumerator {
@@ -29,21 +44,43 @@ export abstract class PackageEnumerator {
             }
             
             const packageJsonPath = path.join(packagePath, "package.json");
-            if (!fs.existsSync(packageJsonPath)) {
-                continue;
-            }
 
             const packageJson = this.readPackageJson(packageJsonPath);
-            if (!packageJson.name) {
-                console.log("blerf:", packageJsonPath, "does not have a name");
+            if (!packageJson || !packageJson.name) {
+                console.log("blerf: skipping", packageJsonPath, ". cannot find valid package.json with name.");
                 continue;
             }
 
             nodes.push(packageJson.name);
 
+            const dependencies: PackageDependenciesType = {};
+
+            this.enumerateDependencies(packageJson, (name, version, dev) => {
+                const dependencyPath = path.join(packagePath, "node_modules", name);
+                const dependencyPackageJson = this.readPackageJson(path.join(dependencyPath, "package.json"));
+                const projectReferenceDependencies: { [packageName: string]: string } = {};
+
+                if (dependencyPackageJson && version.startsWith("file:")) {
+                    this.enumerateDependencies(dependencyPackageJson, (name, version, dev) => {
+                        if (!dev) {
+                            projectReferenceDependencies[name] = version;
+                        }
+                    });
+                }
+
+                dependencies[name] = {
+                    packageJson: dependencyPackageJson,
+                    packagePath: dependencyPath,
+                    version: version,
+                    projectReferenceDependencies: projectReferenceDependencies,
+                    dev: dev,
+                }
+            });
+
             packages[packageJson.name] = {
                 packageJson: packageJson,
-                packagePath: packagePath
+                packagePath: packagePath,
+                dependencies: dependencies,
             };
         }
 
@@ -51,25 +88,12 @@ export abstract class PackageEnumerator {
             const packageInfo = packages[packageName];
             const packageJson = packageInfo.packageJson;
 
-            if (packageJson.dependencies) {
-                for (let dependencyName of Object.keys(packageJson.dependencies)) {
-                    const ref = packageJson.dependencies[dependencyName];
-                    if (ref.startsWith("file:") && nodes.indexOf(dependencyName) !== -1) {
-                        this.validateFileReference(ref, dependencyName);
-                        edges.push([dependencyName, packageJson.name])
-                    }
+            this.enumerateDependencies(packageJson, (name, version, dev) => {
+                if (version.startsWith("file:") && nodes.indexOf(name) !== -1) {
+                    this.validateFileReference(version, name);
+                    edges.push([name, packageJson.name])
                 }
-            }
-
-            if (packageJson.devDependencies) {
-                for (let dependencyName of Object.keys(packageJson.devDependencies)) {
-                    const ref = packageJson.devDependencies[dependencyName];
-                    if (ref.startsWith("file:") && nodes.indexOf(dependencyName) !== -1) {
-                        this.validateFileReference(ref, dependencyName);
-                        edges.push([dependencyName, packageJson.name])
-                    }
-                }
-            }
+            });
         }
 
         const sorted = toposort(nodes, edges);
@@ -90,8 +114,26 @@ export abstract class PackageEnumerator {
         }
     }
 
-    protected readPackageJson(packageJsonPath: string) {
-        return JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+    protected enumerateDependencies(packageJson: any, callback: (name: string, version: string, dev: boolean) => void) {
+        if (packageJson.dependencies) {
+            for (let name of Object.keys(packageJson.dependencies)) {
+                callback(name, packageJson.dependencies[name], false);
+            }
+        }
+
+        if (packageJson.devDependencies) {
+            for (let name of Object.keys(packageJson.devDependencies)) {
+                callback(name, packageJson.devDependencies[name], true);
+            }
+        }
+    }
+
+    protected readPackageJson(packageJsonPath: string): any|null {
+        try {
+            return JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+        } catch (e) {
+            return null;
+        }
     }
 
     protected rimraf(dir_path: string) {
@@ -146,7 +188,7 @@ export abstract class PackageEnumerator {
             }
 
             const dependencyPackageInfo = packages[dependencyName];
-            packageDependencies[dependencyName] = path.join(artifactPackFullPath, dependencyPackageInfo.packageJson.name + "-" + dependencyPackageInfo.packageJson.version + ".tgz");
+            packageDependencies[dependencyName] = "file:" + path.join(artifactPackFullPath, dependencyPackageInfo.packageJson.name + "-" + dependencyPackageInfo.packageJson.version + ".tgz");
         }
     }
 
