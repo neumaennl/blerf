@@ -218,10 +218,10 @@ export class BuildEnumerator extends PackageEnumerator {
                     const dependencyPath = path.join(packageInfo.packagePath, "node_modules", refreshProjectReference.name);
                     this.rimraf(dependencyPath);
 
-                    const sourceTarPath = path.join(this.artifactBuildPath,  refreshProjectReference.name + ".tgz");
+                    const sourceTarPath = path.join(this.artifactBuildPath, refreshProjectReference.name + ".tgz");
 
                     fs.mkdirSync(dependencyPath, { recursive: true });
-                    tar.extract({ file: sourceTarPath, cwd: dependencyPath, sync: true, strip: 1, filter: (path: string, entry: any) => !path.endsWith("package.json")  });
+                    tar.extract({ file: sourceTarPath, cwd: dependencyPath, sync: true, strip: 1 });
 
                     integrities[refreshProjectReference.name] = ssri.fromData(fs.readFileSync(sourceTarPath));
                 }
@@ -251,7 +251,7 @@ export class BuildEnumerator extends PackageEnumerator {
         for (let dependencyName of Object.keys(integrities)) {
             const dep = packageLockJson.dependencies[dependencyName];
             if (dep && dep.integrity) {
-                console.log("blerf: replacing integrity", dep.integrity, integrities[dependencyName])
+                // console.log("blerf: replacing integrity", dep.integrity, integrities[dependencyName])
                 dep.integrity = integrities[dependencyName];
             }
         }
