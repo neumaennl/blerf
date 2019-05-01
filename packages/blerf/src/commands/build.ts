@@ -210,7 +210,10 @@ export class BuildEnumerator extends PackageEnumerator {
         const installPackages: string[] = [];
         if (refreshProjectReferences.length > 0) {
             const names = refreshProjectReferences.map(p => p.name);
-            if (refreshProjectReferences.length === fastRefreshProjectReferences.length) {
+
+            shouldInstall = this.needsNpmInstallDependencies(packageInfo);
+
+            if (!shouldInstall && refreshProjectReferences.length === fastRefreshProjectReferences.length) {
                 console.log("blerf: fast refresh", names.join(" "));
                 // delete from node_modules, unpack directly; update hash in lockfile?
                 const integrities: {[key: string]: string} = {};
