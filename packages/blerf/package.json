@@ -1,6 +1,6 @@
 {
   "name": "blerf",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Build tool for nodejs monorepos working alongside npm. Helps manage multiple projects in a solution.",
   "author": "andersnm",
   "license": "MIT",

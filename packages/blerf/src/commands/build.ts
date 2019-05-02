@@ -34,7 +34,7 @@ export class BuildEnumerator extends PackageEnumerator {
     protected async processPackage(packagePath: string, packageJson: any, packages: PackagesType): Promise<void> {
         console.log("blerf: building", packageJson.name);
 
-        this.installBeforeBuild(packages[packageJson.name], packages);
+        await this.installBeforeBuild(packages[packageJson.name], packages);
 
         const targetTarPath = path.join(this.artifactBuildPath,  packageJson.name + ".tgz");
 
@@ -189,7 +189,7 @@ export class BuildEnumerator extends PackageEnumerator {
         return false;
     }
 
-    private installBeforeBuild(packageInfo: PackageInfoType, packages: PackagesType) {
+    private async installBeforeBuild(packageInfo: PackageInfoType, packages: PackagesType): Promise<void> {
         // fast refresh project reference if:
         //   - tarball is newer, and NO sub dependency changes
 
@@ -219,7 +219,7 @@ export class BuildEnumerator extends PackageEnumerator {
                 const integrities: {[key: string]: string} = {};
                 for (let refreshProjectReference of refreshProjectReferences) {
                     const dependencyPath = path.join(packageInfo.packagePath, "node_modules", refreshProjectReference.name);
-                    this.rimraf(dependencyPath);
+                    await this.rimrafWithRetry(dependencyPath);
 
                     const sourceTarPath = path.join(this.artifactBuildPath, refreshProjectReference.name + ".tgz");
 

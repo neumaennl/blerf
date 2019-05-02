@@ -136,6 +136,23 @@ export abstract class PackageEnumerator {
         }
     }
 
+    protected async rimrafWithRetry(path: string): Promise<void> {
+        const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+        let retryCounter = 10;
+        while (retryCounter > 0) {
+            try {
+                this.rimraf(path);
+                break;
+            } catch (e) {
+                retryCounter--;
+                if (retryCounter) {
+                    console.warn("blerf: " + e.message + ". Retrying...");
+                    await sleep(100);
+                }
+            }
+        }
+    }
+
     protected rimraf(dir_path: string) {
         // Remove directory recursively
         // https://stackoverflow.com/a/42505874/3027390
