@@ -17,7 +17,7 @@ Build tool for nodejs monorepos working alongside npm. Helps manage multiple pro
 
 Installs dependencies, executes any build steps and creates a tarball for each directory under ./packages containing a package.json.
 
-Dependencies are skipped if there are no changes. Regular dependencies are checked if the installed version matches the declared semver range. Project dependencies are checked if the tarball timestamp if newer than the installed module directory. If the tarball has changed, the project is removed from node_modules and package-lock before reinstalling. Uses `npm install` under the hood.
+Dependencies are skipped if there are no changes. Regular dependencies are checked if the installed version matches the declared semver range. Project dependencies are checked if the tarball timestamp is newer than the installed module directory. If the tarball has changed, the project is removed from node_modules and package-lock before reinstalling. Uses `npm install` under the hood.
 
 Build steps are specified in package.json. Build steps are skipped if there are no changes in the filesystem based on the glob patterns in `srcPath` and `outPath`. The code in `script` is spawned similar to npm scripts, where the PATH environment variable is modified to include node_modules/.bin.
 
@@ -73,7 +73,19 @@ Basic conventions and guidelines:
 
 Any dependencies starting with `file:` is assumed to be a project reference, and must point at the corresponding tarball from the build output. The project reference must be formatted like `file:../../artifacts/build/(projectname).tgz`. The project name must be the same as the dependency name.
 
-`blerf build` automatically detects changes in project dependencies, and automates all steps necessary to reinstall.
+`blerf build` automatically detects changes in project dependencies, and automates all steps necessary to reinstall with npm.
+
+The following conditions are handled:
+
+|Condition|Action(s)|
+|-|-|-|
+|Project reference code changes.<br>No project reference dependency changes.<br>No local dependency changes.| *fast refresh*|
+|Project reference dependency changes.<br>No local dependency changes.|`npm install <project names...>`|
+|Project reference dependency changes.<br>Local dependency changes.|`npm uninstall <project names...>`<br>`npm install`|
+|No project reference dependency changes.<br>Local dependency changes.|`npm install`|
+|No project reference code changes.<br>No project reference dependency changes.<br>No local dependency changes.|*no operation*|
+
+Fast refresh replaces the installed project references directly. Fast refresh does not invoke `npm`.
 
 ## Build steps
 

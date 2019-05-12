@@ -56,7 +56,7 @@ export class BuildEnumerator extends PackageEnumerator {
         }
 
         if (shouldPack) {
-            this.packBuildArtifact(packagePath, packageJson, packages, targetTarPath);
+            await this.packBuildArtifact(packagePath, packageJson, packages, targetTarPath);
         }
     }
 
@@ -207,15 +207,16 @@ export class BuildEnumerator extends PackageEnumerator {
         const fastRefreshProjectReferences = refreshProjectReferences.filter(p => p.isInstalled && !p.hasDependencyChanges);
 
         let shouldInstall = false;
-        const installPackages: string[] = [];
+
         if (refreshProjectReferences.length > 0) {
             const names = refreshProjectReferences.map(p => p.name);
 
             shouldInstall = this.needsNpmInstallDependencies(packageInfo);
 
             if (!shouldInstall && refreshProjectReferences.length === fastRefreshProjectReferences.length) {
-                console.log("blerf: fast refresh", names.join(" "));
-                // delete from node_modules, unpack directly; update hash in lockfile?
+                // There are dependency changes in the local project, no dependency changes in project references, and only code changes in project references
+                // Delete from node_modules, unpack directly; update integridy hash in lockfile
+                console.log("blerf: detected changes in project reference, but no dependency changes. fast refresh " + names.join(" "));
                 const integrities: {[key: string]: string} = {};
                 for (let refreshProjectReference of refreshProjectReferences) {
                     const dependencyPath = path.join(packageInfo.packagePath, "node_modules", refreshProjectReference.name);
@@ -230,18 +231,24 @@ export class BuildEnumerator extends PackageEnumerator {
                 }
 
                 this.updatePackageLockIntegrities(packageInfo.packagePath, integrities);
+            } else if (!shouldInstall) {
+                // There are dependency changes in the local project, and dependency changes in project references
+                console.log("blerf: detected dependency changes in project references " + names.join(", "));
+                childProcess.execSync("npm install " + names.join(" "), {stdio: 'inherit', cwd: packageInfo.packagePath});
             } else {
-                console.log("blerf: refresh project reference with npm install");
-                installPackages.push(...names);
+                // There are dependency changes in both the local project AND in project references
+                console.log("blerf: detected dependency changes in local project and project references " + names.join(" "));
+                childProcess.execSync("npm uninstall --no-save " + names.join(" "), {stdio: 'inherit', cwd: packageInfo.packagePath});
+                childProcess.execSync("npm install", {stdio: 'inherit', cwd: packageInfo.packagePath});
                 shouldInstall = true;
             }
         } else {
             shouldInstall = this.needsNpmInstallDependencies(packageInfo);
-        }
-
-        if (shouldInstall) {
-            console.log("blerf: installing " + packageInfo.packageJson.name);
-            childProcess.execSync("npm install " + installPackages.join(" "), {stdio: 'inherit', cwd: packageInfo.packagePath});
+            if (shouldInstall) {
+                // There are dependency changes in the local project, and no dependency changes in project references
+                console.log("blerf: detected dependency changes in " + packageInfo.packageJson.name);
+                childProcess.execSync("npm install", {stdio: 'inherit', cwd: packageInfo.packagePath});
+            }
         }
     }
 
@@ -262,7 +269,7 @@ export class BuildEnumerator extends PackageEnumerator {
         fs.writeFileSync(path.join(packagePath, "package-lock.json"), stringifyPackage(packageLockJson), 'utf8');
     }
 
-    private packBuildArtifact(packagePath: string, packageJson: any, packages: PackagesType, targetTarPath: string) {
+    private async packBuildArtifact(packagePath: string, packageJson: any, packages: PackagesType, targetTarPath: string) {
         childProcess.execSync("npm pack --loglevel error", {stdio: 'inherit', cwd: packagePath});
 
         const sourceTarPath = path.join(packagePath, packageJson.name + "-" + packageJson.version + ".tgz");
@@ -279,10 +286,38 @@ export class BuildEnumerator extends PackageEnumerator {
             this.trimPackageJson(packageJson);
             fs.writeFileSync(packageJsonPath, stringifyPackage(packageJson), 'utf8');
 
+            const shouldUpdateSourceMapsSourceRoot = !packageJson.blerf || packageJson.blerf.updateSourceMapsSourceRoot !== false;
+            if (shouldUpdateSourceMapsSourceRoot) {
+                await this.updateSourceMapsSourceRoot(tempPath, packageJson);
+            }
+
             tar.create({ file: targetTarPath, cwd: tempPath, gzip: true, sync: true, }, ["package"]);
         } finally {
             this.rimraf(tempPath);
             fs.unlinkSync(sourceTarPath);
+        }
+    }
+
+    private async updateSourceMapsSourceRoot(tempPath: string, packageJson: any) {
+        const packageRootPath = path.join(tempPath, "package");
+        const mapFileNames = await glob(path.join(packageRootPath, "**/*.map"));
+        for (let mapFileName of mapFileNames) {
+            const mapRelativeName = path.relative(packageRootPath, mapFileName);
+
+            const mapJson = this.readPackageJson(mapFileName);
+
+            // Find the relative path between where the .map file has been installed, and its corresponding source location under ./packages
+            const relativeMapToModulePath = path.relative(path.dirname(mapRelativeName), ".");
+            const relativeModuleToPackagesPath = "../../.."; // <project>/node_modules/<reference>
+            const relativeSourceRoot = path.join(relativeMapToModulePath, relativeModuleToPackagesPath, packageJson.name, path.dirname(mapRelativeName));
+
+            // Absolute path works in VSCode/windows, but seemingly not in Istanbul reports
+            // Backslash works in VSCode/windows, but seemingly not in Istanbul reports
+            // const absoluteSourceRoot = path.resolve(packagePath, path.dirname(mapRelativeName));
+
+            mapJson.sourceRoot = relativeSourceRoot.replace(/\\/g, "/");
+
+            fs.writeFileSync(mapFileName, JSON.stringify(mapJson), "utf8");
         }
     }
 
