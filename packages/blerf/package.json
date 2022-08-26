@@ -20,7 +20,7 @@
     "typescript": "^3.3.1"
   },
   "dependencies": {
-    "fast-glob": "^2.2.6",
+    "fast-glob": "^3.2.11",
     "stringify-package": "^1.0.0",
     "tar": "^6.1.11",
     "istanbul-lib-coverage": "^3.2.0",
@@ -30,7 +30,7 @@
     "semver": "^6.0.0",
     "source-map-resolve": "^0.5.2",
     "source-map": "^0.7.3",
-    "ssri": "^6.0.1",
+    "ssri": "^9.0.1",
     "v8-to-istanbul": "^2.0.4"
   },
   "blerf": {
