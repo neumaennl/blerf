@@ -170,8 +170,15 @@ export abstract class PackageEnumerator {
         }
     }
 
+    protected packageNameToFileName(packageName: string): string {
+        if(packageName.startsWith("@")) {
+            return packageName.substring(1).replace("/", "-");
+        }
+        return packageName;
+    }
+
     protected validateFileReference(version: string, packageName: string) {
-        const expectedReference = "file:../../artifacts/build/" + packageName + ".tgz";
+        const expectedReference = "file:../../artifacts/build/" + this.packageNameToFileName(packageName) + ".tgz";
         if (version !== expectedReference) {
             throw new Error("Project reference to " + packageName + " must be \"" + expectedReference + "\"");
         }
@@ -189,7 +196,7 @@ export abstract class PackageEnumerator {
             }
 
             const dependencyPackageInfo = packages[dependencyName];
-            packageDependencies[dependencyName] = path.join(artifactPackFullPath, dependencyPackageInfo.packageJson.name + ".tgz");
+            packageDependencies[dependencyName] = path.join(artifactPackFullPath, this.packageNameToFileName(dependencyPackageInfo.packageJson.name) + ".tgz");
         }
     }
 
@@ -205,7 +212,7 @@ export abstract class PackageEnumerator {
             }
 
             const dependencyPackageInfo = packages[dependencyName];
-            packageDependencies[dependencyName] = "file:" + path.join(artifactPackFullPath, dependencyPackageInfo.packageJson.name + "-" + dependencyPackageInfo.packageJson.version + ".tgz");
+            packageDependencies[dependencyName] = "file:" + path.join(artifactPackFullPath, this.packageNameToFileName(dependencyPackageInfo.packageJson.name) + "-" + dependencyPackageInfo.packageJson.version + ".tgz");
         }
     }
 

@@ -36,7 +36,7 @@ export class BuildEnumerator extends PackageEnumerator {
 
         await this.installBeforeBuild(packages[packageJson.name], packages);
 
-        const targetTarPath = path.join(this.artifactBuildPath,  packageJson.name + ".tgz");
+        const targetTarPath = path.join(this.artifactBuildPath,  this.packageNameToFileName(packageJson.name) + ".tgz");
 
         let shouldPack = !fs.existsSync(targetTarPath);
 
@@ -222,7 +222,7 @@ export class BuildEnumerator extends PackageEnumerator {
                     const dependencyPath = path.join(packageInfo.packagePath, "node_modules", refreshProjectReference.name);
                     await this.rimrafWithRetry(dependencyPath);
 
-                    const sourceTarPath = path.join(this.artifactBuildPath, refreshProjectReference.name + ".tgz");
+                    const sourceTarPath = path.join(this.artifactBuildPath, this.packageNameToFileName(refreshProjectReference.name) + ".tgz");
 
                     fs.mkdirSync(dependencyPath, { recursive: true });
                     tar.extract({ file: sourceTarPath, cwd: dependencyPath, sync: true, strip: 1 });
@@ -272,7 +272,7 @@ export class BuildEnumerator extends PackageEnumerator {
     private async packBuildArtifact(packagePath: string, packageJson: any, packages: PackagesType, targetTarPath: string) {
         childProcess.execSync("npm pack --loglevel error", {stdio: 'inherit', cwd: packagePath});
 
-        const sourceTarPath = path.join(packagePath, packageJson.name + "-" + packageJson.version + ".tgz");
+        const sourceTarPath = path.join(packagePath, this.packageNameToFileName(packageJson.name) + "-" + packageJson.version + ".tgz");
         fs.mkdirSync(this.artifactBuildPath, { recursive: true });
 
         const tempPath = fs.mkdtempSync(path.join(os.tmpdir(), "blerf-"));

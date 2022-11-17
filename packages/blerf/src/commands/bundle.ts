@@ -25,8 +25,8 @@ export class BundleEnumerator extends PackageEnumerator {
     protected async processPackage(packagePath: string, packageJson: any, packages: PackagesType): Promise<void> {
         console.log("blerf: bundling", packageJson.name);
         const tempPath = fs.mkdtempSync(path.join(os.tmpdir(), "blerf-"));
-        const artifactPackTarPath = path.join(this.artifactPackPath, packageJson.name + "-" + packageJson.version + ".tgz");
-        const artifactTarPath = path.join(this.artifactDeployPath, packageJson.name + "-" + packageJson.version + ".tgz");
+        const artifactPackTarPath = path.join(this.artifactPackPath, this.packageNameToFileName(packageJson.name) + "-" + packageJson.version + ".tgz");
+        const artifactTarPath = path.join(this.artifactDeployPath, this.packageNameToFileName(packageJson.name) + "-" + packageJson.version + ".tgz");
 
         fs.mkdirSync(this.artifactDeployPath, { recursive: true });
 
