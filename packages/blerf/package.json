@@ -1,14 +1,20 @@
 {
-  "name": "blerf",
+  "name": "@neumaennl/blerf",
   "version": "0.0.11",
   "description": "Build tool for nodejs monorepos working alongside npm. Helps manage multiple projects in a solution.",
   "author": "andersnm",
+  "contributors": ["neumaennl"],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/andersnm/blerf.git"
+    "url": "https://github.com/neumaennl/blerf.git"
   },
-  "bin": "lib/index.js",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "bin": {
+    "blerf": "lib/index.js"
+  },
   "files": [
     "lib"
   ],
